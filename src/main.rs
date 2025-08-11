@@ -1,8 +1,7 @@
 use alloy::{primitives::address, providers::ProviderBuilder, sol};
 use std::error::Error;
+use alloy::primitives::{utils::format_units, U256};
 
-const WETH_DECIMALS: u8 = 18;
-const USDC_DECIMALS: u8 = 6;
 const USDC_ADDRESS: alloy::primitives::Address = address!("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
 const WETH_ADDRESS: alloy::primitives::Address = address!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
 
@@ -104,13 +103,11 @@ async fn get_price(pool: &Pool, provider: &alloy::providers::fillers::FillProvid
             let v3 = UniswapV3Pool::new(pool.address, provider);
             let s0 = v3.slot0().call().await?;
             let sqrt= s0.sqrtPriceX96;  // uint160
-            let tick= s0.tick;
+            // https://medium.com/@jaysojitra1011/uniswap-v3-deep-dive-visualizing-ticks-and-liquidity-provisioning-part-3-081db166243b
+            // https://rareskills.io/post/uniswap-v3-sqrtpricex96
             // sqrt is token0/token1 which is usdc/weth here
-            // Call slot0
-            let sqrt = s0.sqrtPriceX96;
 
             println!("sqrtPriceX96: {sqrt}"); // 1208817391332478608298690367966474
-            println!("tick:         {tick}"); // 192666
             Ok(())
         }
         _ => {
