@@ -1,6 +1,7 @@
 use alloy::{primitives::address, providers::ProviderBuilder, sol};
 use std::error::Error;
 use alloy::primitives::{utils::format_units, U256};
+use std::str::FromStr;
 
 const USDC_ADDRESS: alloy::primitives::Address = address!("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
 const WETH_ADDRESS: alloy::primitives::Address = address!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
@@ -92,22 +93,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let price = get_price(&pool, &provider).await?;
 
-    // 1/((1208817391332478608298690367966474/2^96)^2/10^12) = 4273 which is the real eth price per eth
-
     Ok(())
 }
 
 async fn get_price(pool: &Pool, provider: &alloy::providers::fillers::FillProvider<alloy::providers::fillers::JoinFill<alloy::providers::Identity, alloy::providers::fillers::JoinFill<alloy::providers::fillers::GasFiller, alloy::providers::fillers::JoinFill<alloy::providers::fillers::BlobGasFiller, alloy::providers::fillers::JoinFill<alloy::providers::fillers::NonceFiller, alloy::providers::fillers::ChainIdFiller>>>>, alloy::providers::RootProvider>) -> Result<(), Box<dyn Error>> {
     match pool.version {
         3 => {
-            let v3 = UniswapV3Pool::new(pool.address, provider);
-            let s0 = v3.slot0().call().await?;
-            let sqrt= s0.sqrtPriceX96;  // uint160
             // https://medium.com/@jaysojitra1011/uniswap-v3-deep-dive-visualizing-ticks-and-liquidity-provisioning-part-3-081db166243b
             // https://rareskills.io/post/uniswap-v3-sqrtpricex96
-            // sqrt is token0/token1 which is usdc/weth here
+            
+            // price = (q64_96/2^96)^2 / 10^(token1_decimals - token0_decimals)
 
-            println!("sqrtPriceX96: {sqrt}"); // 1208817391332478608298690367966474
+            let v3 = UniswapV3Pool::new(pool.address, provider);
+            let s0 = v3.slot0().call().await?;
+            let q64_96= U256::from(s0.sqrtPriceX96);
+            let q64_96 = (q64_96 >> 96) * (q64_96 >> 96);
+            let denominator_diff = pool.token1.decimals - pool.token0.decimals;
+            println!("denominator_diff: {denominator_diff}");
+
+            let price = format_units(q64_96, denominator_diff).unwrap();
+            let price = f64::from_str(&price).unwrap();
+
+            if pool.token0.address == USDC_ADDRESS {
+                let price = 1.0 / price;
+                println!("price: {}", price);
+            } else {
+                println!("price: {price}");
+            }
+
             Ok(())
         }
         _ => {
