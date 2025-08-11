@@ -1,0 +1,120 @@
+use alloy::{primitives::address, providers::ProviderBuilder, sol};
+use std::error::Error;
+
+const WETH_DECIMALS: u8 = 18;
+const USDC_DECIMALS: u8 = 6;
+const USDC_ADDRESS: alloy::primitives::Address = address!("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+const WETH_ADDRESS: alloy::primitives::Address = address!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+
+// Generate bindings for the Uniswap V3 pool state interface
+sol! {
+    #[sol(rpc)]
+    contract UniswapV3Pool {
+
+        address public immutable override token0;
+        address public immutable override token1;
+        uint24 public immutable override fee;
+
+        function slot0() external view returns (
+            uint160 sqrtPriceX96,
+            int24 tick,
+            uint16 observationIndex,
+            uint16 observationCardinality,
+            uint16 observationCardinalityNext,
+            uint8 feeProtocol,
+            bool unlocked
+        );
+    }
+}
+
+sol! {
+    #[sol(rpc)]
+    interface IERC20 {
+        event Approval(address indexed owner, address indexed spender, uint value);
+        event Transfer(address indexed from, address indexed to, uint value);
+    
+        function name() external view returns (string memory);
+        function symbol() external view returns (string memory);
+        function decimals() external view returns (uint8);
+        function totalSupply() external view returns (uint);
+        function balanceOf(address owner) external view returns (uint);
+        function allowance(address owner, address spender) external view returns (uint);
+    
+        function approve(address spender, uint value) external returns (bool);
+        function transfer(address to, uint value) external returns (bool);
+        function transferFrom(address from, address to, uint value) external returns (bool);
+    }
+}
+
+struct Token {
+    address: alloy::primitives::Address,
+    decimals: u8,
+}
+
+struct Pool {
+    address: alloy::primitives::Address,
+    version: u8, // 1 for v1, 2 for v2
+    token0: Token,
+    token1: Token,
+    fee: alloy::primitives::Uint<24, 1>,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    // Provider (pick your endpoint)
+    let provider = ProviderBuilder::new()
+        .connect("https://reth-ethereum.ithaca.xyz/rpc")
+        .await?;
+
+    // Pool address (WETH/USDC 0.05% on mainnet)
+    let pool = address!("0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640");
+
+    // initialize pool
+    let uni = UniswapV3Pool::new(pool, &provider);
+    let token0 = uni.token0().call().await?;
+    let token1 = uni.token1().call().await?;
+    let fee = uni.fee().call().await?;
+    let token0_decimals = IERC20::new(token0, &provider).decimals().call().await?;
+    let token1_decimals = IERC20::new(token1, &provider).decimals().call().await?;
+
+    let pool = Pool {
+        address: pool,
+        version: 3,
+        token0: Token {
+            address: token0,
+            decimals: token0_decimals,
+        },
+        token1: Token {
+            address: token1,
+            decimals: token1_decimals,
+        },
+        fee
+    };
+
+    let price = get_price(&pool, &provider).await?;
+
+    // 1/((1208817391332478608298690367966474/2^96)^2/10^12) = 4273 which is the real eth price per eth
+
+    Ok(())
+}
+
+async fn get_price(pool: &Pool, provider: &alloy::providers::fillers::FillProvider<alloy::providers::fillers::JoinFill<alloy::providers::Identity, alloy::providers::fillers::JoinFill<alloy::providers::fillers::GasFiller, alloy::providers::fillers::JoinFill<alloy::providers::fillers::BlobGasFiller, alloy::providers::fillers::JoinFill<alloy::providers::fillers::NonceFiller, alloy::providers::fillers::ChainIdFiller>>>>, alloy::providers::RootProvider>) -> Result<(), Box<dyn Error>> {
+    match pool.version {
+        3 => {
+            let v3 = UniswapV3Pool::new(pool.address, provider);
+            let s0 = v3.slot0().call().await?;
+            let sqrt= s0.sqrtPriceX96;  // uint160
+            let tick= s0.tick;
+            // sqrt is token0/token1 which is usdc/weth here
+            // Call slot0
+            let sqrt = s0.sqrtPriceX96;
+
+            println!("sqrtPriceX96: {sqrt}"); // 1208817391332478608298690367966474
+            println!("tick:         {tick}"); // 192666
+            Ok(())
+        }
+        _ => {
+            panic!("Unsupported pool version");
+        }
+    }
+}

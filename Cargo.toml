@@ -1,0 +1,11 @@
+[package]
+name = "learn_alloy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy = { version = "1.0.24", features = ["full", "provider-anvil-node"] }
+tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros"] }
+futures-util = "0.3"
+eyre = "0.6.12"
+tracing = "0.1.41"
