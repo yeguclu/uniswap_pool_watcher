@@ -92,11 +92,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let price = get_price(&pool, &provider).await?;
+    println!("price: {price}");
 
     Ok(())
 }
 
-async fn get_price(pool: &Pool, provider: &alloy::providers::fillers::FillProvider<alloy::providers::fillers::JoinFill<alloy::providers::Identity, alloy::providers::fillers::JoinFill<alloy::providers::fillers::GasFiller, alloy::providers::fillers::JoinFill<alloy::providers::fillers::BlobGasFiller, alloy::providers::fillers::JoinFill<alloy::providers::fillers::NonceFiller, alloy::providers::fillers::ChainIdFiller>>>>, alloy::providers::RootProvider>) -> Result<(), Box<dyn Error>> {
+// very sloppy implementation, havent figured out operatioans and conversions betweeen bigints and floats
+async fn get_price(pool: &Pool, provider: &alloy::providers::fillers::FillProvider<alloy::providers::fillers::JoinFill<alloy::providers::Identity, alloy::providers::fillers::JoinFill<alloy::providers::fillers::GasFiller, alloy::providers::fillers::JoinFill<alloy::providers::fillers::BlobGasFiller, alloy::providers::fillers::JoinFill<alloy::providers::fillers::NonceFiller, alloy::providers::fillers::ChainIdFiller>>>>, alloy::providers::RootProvider>) -> Result<f64, Box<dyn Error>> {
     match pool.version {
         3 => {
             // https://medium.com/@jaysojitra1011/uniswap-v3-deep-dive-visualizing-ticks-and-liquidity-provisioning-part-3-081db166243b
@@ -109,19 +111,15 @@ async fn get_price(pool: &Pool, provider: &alloy::providers::fillers::FillProvid
             let q64_96= U256::from(s0.sqrtPriceX96);
             let q64_96 = (q64_96 >> 96) * (q64_96 >> 96);
             let denominator_diff = pool.token1.decimals - pool.token0.decimals;
-            println!("denominator_diff: {denominator_diff}");
 
             let price = format_units(q64_96, denominator_diff).unwrap();
-            let price = f64::from_str(&price).unwrap();
+            let mut price = f64::from_str(&price).unwrap();
 
             if pool.token0.address == USDC_ADDRESS {
-                let price = 1.0 / price;
-                println!("price: {}", price);
-            } else {
-                println!("price: {price}");
+                price = 1.0 / price;
             }
 
-            Ok(())
+            Ok(price)
         }
         _ => {
             panic!("Unsupported pool version");
