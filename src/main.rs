@@ -3,7 +3,6 @@ use std::error::Error;
 use alloy::primitives::{utils::format_units, U256};
 use std::str::FromStr;
 use tokio::time::Duration;
-use std::sync::Arc;
 
 
 const USDC_ADDRESS: alloy::primitives::Address = address!("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
@@ -51,12 +50,12 @@ sol! {
         function transferFrom(address from, address to, uint value) external returns (bool);
     }
 }
-
+#[derive(Clone)]
 struct Token {
     address: alloy::primitives::Address,
     decimals: u8,
 }
-
+#[derive(Clone)]
 struct Pool {
     address: alloy::primitives::Address,
     version: u8, // 1 for v1, 2 for v2
@@ -115,17 +114,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut handles = Vec::new();
-    let pools = Arc::new(pools);
-    let provider_pool = Arc::new(provider_pool);
 
     // 2 pools for now
-    for i in 0..2 {
-        let pools = Arc::clone(&pools);
-        let provider_pool = Arc::clone(&provider_pool);
+    for (i, _) in pools.iter().enumerate() {
+        let provider = provider_pool[i].clone();
+        let pool = pools[i].clone();
 
         let handle =tokio::spawn(async move {
             loop {
-                let price = get_price(&pools[i], &provider_pool[i]).await.unwrap();
+                let price = get_price(&pool, &provider).await.unwrap();
                 println!("price: {price}");
                 tokio::time::sleep(Duration::from_secs(12)).await;
             }
