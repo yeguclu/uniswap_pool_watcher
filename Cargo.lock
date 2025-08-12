@@ -2243,6 +2243,7 @@ dependencies = [
  "alloy",
  "eyre",
  "futures-util",
+ "rand 0.9.2",
  "tokio",
  "tracing",
 ]

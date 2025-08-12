@@ -1,10 +1,16 @@
-use alloy::{primitives::address, providers::ProviderBuilder, sol};
+use alloy::{primitives::address, providers::{ProviderBuilder, Provider}, sol};
 use std::error::Error;
 use alloy::primitives::{utils::format_units, U256};
 use std::str::FromStr;
+use tokio::time::Duration;
+use std::sync::Arc;
+
 
 const USDC_ADDRESS: alloy::primitives::Address = address!("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
-const WETH_ADDRESS: alloy::primitives::Address = address!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+const POOL_ADDRESSES: [&str; 2] = [
+    "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640", // WETH/USDC 0.05%
+    "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8", // WETH/USDC 0.3%
+];
 
 // Generate bindings for the Uniswap V3 pool state interface
 sol! {
@@ -62,37 +68,74 @@ struct Pool {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Provider (pick your endpoint)
-    let provider = ProviderBuilder::new()
-        .connect("https://reth-ethereum.ithaca.xyz/rpc")
-        .await?;
+    let mut provider_pool = Vec::new();
+    for _ in 0..10 {
+        let provider = ProviderBuilder::new()
+            .connect("https://reth-ethereum.ithaca.xyz/rpc")
+            .await?;
+        provider_pool.push(provider);
+    }
 
-    // Pool address (WETH/USDC 0.05% on mainnet)
-    let pool = address!("0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640");
+    let provider = provider_pool[0].clone();
+    // Vector to store pool instances
+    let mut pools: Vec<Pool> = Vec::new();
 
-    // initialize pool
-    let uni = UniswapV3Pool::new(pool, &provider);
-    let token0 = uni.token0().call().await?;
-    let token1 = uni.token1().call().await?;
-    let fee = uni.fee().call().await?;
-    let token0_decimals = IERC20::new(token0, &provider).decimals().call().await?;
-    let token1_decimals = IERC20::new(token1, &provider).decimals().call().await?;
+    // Create pool instances for each hardcoded address
+    for pool_address_str in POOL_ADDRESSES.iter() {
+        let pool_address = pool_address_str.parse::<alloy::primitives::Address>()?;
+        
+        // Initialize pool contract
+        let uni = UniswapV3Pool::new(pool_address, &provider);
+        
+        // Get pool info using multicall
+        let multicall = provider.multicall().add(uni.token0()).add(uni.token1()).add(uni.fee());
+        let (token0, token1, fee) = multicall.aggregate().await?;
+        
+        let multicall = provider.multicall()
+            .add(IERC20::new(token0, &provider).decimals())
+            .add(IERC20::new(token1, &provider).decimals());
+        let (token0_decimals, token1_decimals) = multicall.aggregate().await?;
 
-    let pool = Pool {
-        address: pool,
-        version: 3,
-        token0: Token {
-            address: token0,
-            decimals: token0_decimals,
-        },
-        token1: Token {
-            address: token1,
-            decimals: token1_decimals,
-        },
-        fee
-    };
+        // Create Pool instance
+        let pool = Pool {
+            address: pool_address,
+            version: 3,
+            token0: Token {
+                address: token0,
+                decimals: token0_decimals,
+            },
+            token1: Token {
+                address: token1,
+                decimals: token1_decimals,
+            },
+            fee
+        };
 
-    let price = get_price(&pool, &provider).await?;
-    println!("price: {price}");
+        pools.push(pool);
+    }
+
+    let mut handles = Vec::new();
+    let pools = Arc::new(pools);
+    let provider_pool = Arc::new(provider_pool);
+
+    // 2 pools for now
+    for i in 0..2 {
+        let pools = Arc::clone(&pools);
+        let provider_pool = Arc::clone(&provider_pool);
+
+        let handle =tokio::spawn(async move {
+            loop {
+                let price = get_price(&pools[i], &provider_pool[i]).await.unwrap();
+                println!("price: {price}");
+                tokio::time::sleep(Duration::from_secs(12)).await;
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.await?;
+    }
 
     Ok(())
 }
