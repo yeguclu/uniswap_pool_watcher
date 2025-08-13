@@ -149,10 +149,20 @@ async fn get_price(pool: &Pool, provider: &alloy::providers::fillers::FillProvid
             let v3 = UniswapV3Pool::new(pool.address, provider);
             let s0 = v3.slot0().call().await?;
             let q64_96= U256::from(s0.sqrtPriceX96);
-            let q64_96 = (q64_96 >> 96) * (q64_96 >> 96);
-            let denominator_diff = pool.token1.decimals - pool.token0.decimals;
 
-            let price = format_units(q64_96, denominator_diff).unwrap();
+            let price = if pool.token1.decimals < pool.token0.decimals {
+                // If token1 has fewer decimals, multiply q64_96 by 10^(token0.decimals - token1.decimals)
+                let multiplier = U256::from(10u64).pow(U256::from(pool.token0.decimals - pool.token1.decimals));
+                let q64_96 = (q64_96 * q64_96) * multiplier;
+                let adjusted_q64_96 = q64_96 >> 192;
+                format_units(adjusted_q64_96, 0).unwrap()
+            } else {
+                let denominator_diff = pool.token1.decimals - pool.token0.decimals;
+                // If token1 has more decimals, use the original approach
+                let q64_96 = (q64_96 * q64_96) >> 192;
+                format_units(q64_96, denominator_diff).unwrap()
+            };
+            
             let mut price = f64::from_str(&price).unwrap();
 
             if pool.token0.address == USDC_ADDRESS {
